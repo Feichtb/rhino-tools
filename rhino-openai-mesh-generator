@@ -1,0 +1,81 @@
+import rhinoscriptsyntax as rs
+import openai
+import json
+import re
+
+# Set your OpenAI API key
+openai.api_key = 'openai-api-key-here'
+
+conversation_history = [
+    {"role": "system", "content": "You are a helpful assistant."}
+]
+
+def extract_json_from_response(response_text):
+    try:
+        # Use regular expressions to extract JSON from the response
+        json_text = response_text.replace("'", '"')
+        json_data = re.search(r'\{.*\}', json_text, re.DOTALL).group()
+        return json.loads(json_data)
+    except Exception as e:
+        print("Error extracting JSON: {}".format(e))
+        return None
+
+def get_mesh_from_gpt4(description):
+
+    prompt = (
+        f"Current Question: Act as a 3d modeler to think step by step to generate a concise JSON representation for a 3D mesh of the following object, based on the current and past prompts. Use your search function to identify dimensions if needed:\n\n"
+        f"Description: {description}\n\n"
+        f"Output format:\n"
+        f"{{\n"
+        f"  \"description\": [[\"object1\", \"(physical description of the basic shape that makes up the object, describing points and surfaces)\", \"(all shape size and location details needed to create the vertices and surfaces of the mesh)\"], [\"object2\", \"(physical description of the basic shape that makes up the object, describing points and surfaces)\", \"(all shape size and location details needed to create the vertices and surfaces of the mesh)\"]],\n"
+        f"  \"vertices\": [[x1, y1, z1], [x2, y2, z2], ...],\n"
+        f"  \"faces\": [[v1, v2, v3], [v4, v5, v6], ...]\n"
+        #f"Previous Conversation history: {conversation_history}\n\n"
+        f"}}"
+    )
+
+    conversation_history.append({"role": "user", "content": prompt})
+
+    response = openai.chat.completions.create(
+        messages=[
+            {"role": "system", "content": "You are a helpful assistant."},
+            {"role": "user", "content": prompt}
+        ],
+        model="gpt-4o",
+        max_tokens=1500,
+        n=1,
+        stop=None,
+        temperature=0.7,
+        response_format={"type": "json_object"}
+    )
+    #print('response:', response)
+    response_text = response.choices[0].message.content.strip()
+    conversation_history.append({"role": "assistant", "content": response_text})
+
+    return extract_json_from_response(response_text)
+
+def create_mesh(vertices, faces):
+    mesh = rs.AddMesh(vertices, faces)
+    if mesh:
+        rs.ObjectName(mesh, "Generated Mesh")
+    return mesh
+
+def main():
+    while True:
+        description = rs.StringBox("Enter a description of the object (or 'exit' to quit):")
+        if not description or description.lower() == 'exit':
+            print("No description provided or exit command received. Exiting.")
+            break
+
+        mesh_data = get_mesh_from_gpt4(description)
+        if not mesh_data:
+            print("Failed to generate mesh data.")
+
+        vertices = mesh_data["vertices"]
+        faces = mesh_data["faces"]
+
+        create_mesh(vertices, faces)
+        print("Mesh created successfully.")
+        print('conversation history:', conversation_history)
+if __name__ == "__main__":
+    main()
